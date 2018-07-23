@@ -81,6 +81,9 @@
 # Release 1.8.4 (2018-02-14) Davide Foschi (argaar (at) gmail.com)
 # - Added HA/Disk/Uptime checks for Generic FortiGate (tested on Forti100D where common cluster OIDs fails)
 # - Added perfdata to WTP
+# Release 1.8.5 (2018-07-23) Remi Verchere (remi.verchere (at) axians.com)
+# - Added hw sensors monitoring for slaves
+# - Added hw sensors output
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -108,7 +111,7 @@ use Socket;
 use POSIX;
 
 my $script = "check_fortigate.pl";
-my $script_version = "1.8.4";
+my $script_version = "1.8.5";
 
 # for more information.
 my %status = (     # Enumeration for the output Nagios states
@@ -749,6 +752,34 @@ sub get_wtp_state {
 
 sub get_hw_state{
    my $k;
+
+   if ( $slave == 1 ) {
+      # if slave, reconnect session with snmp-community based on serial
+      my %snmp_serials = %{get_snmp_table($session, $oid_cluster_serials)};
+      while (($oid, $value) = each (%snmp_serials)) {
+         chomp $value; # remove "\n" if exists
+         if ( !($value =~ $curr_serial) ) {
+            # print "Current serial is ".$value.", ours is ".$curr_serial.", change snmp community\n";
+            $community=$community."-".$value;
+            if ( $snmp_version == 3 ) {
+               # not managed
+            } else {
+               ($session, $error) = get_snmp_session(
+                                       $ip,
+                                       $community,
+                                       $port,
+                                       $snmp_version
+                                    );
+               $curr_device = get_snmp_value($session, $oid_unitdesc);
+               $curr_serial = get_snmp_value($session, $oid_serial);
+            }
+            if ( $error ne "" ) {
+               print "\n$error\n";
+               exit(1);
+            }
+         }
+      }
+   } 
    my $sensor_cnt = get_snmp_value($session, $oid_hwsensor_cnt);
    if ( $sensor_cnt > 0 ) {
       my %hw_name_table = %{get_snmp_table($session, $oid_hwsensorname)};
@@ -795,6 +826,7 @@ sub get_hw_state{
       $return_state = "UNKNOWN";
    }
 
+   $return_string = $return_state . ": " . $curr_device . " (Current device: " . $curr_serial .") " . $return_string;
    return ($return_state, $return_string);
 } # end hw state
 
