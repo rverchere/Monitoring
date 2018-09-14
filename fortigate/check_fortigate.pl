@@ -84,6 +84,9 @@
 # Release 1.8.5 (2018-07-23) Remi Verchere (remi.verchere (at) axians.com)
 # - Added hw sensors monitoring for slaves
 # - Added hw sensors output
+# Release 1.8.6 (2018-09-14) Remi Verchere (remi.verchere (at) axians.com)
+# - Added disk usage monitoring for slaves
+# - Added disk usage output
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -111,7 +114,7 @@ use Socket;
 use POSIX;
 
 my $script = "check_fortigate.pl";
-my $script_version = "1.8.5";
+my $script_version = "1.8.6";
 
 # for more information.
 my %status = (     # Enumeration for the output Nagios states
@@ -358,6 +361,35 @@ sub get_snmp_session_v3 {
 } # end get snmp session
 
 sub get_disk_usage {
+
+   if ( $slave == 1 ) {
+      # if slave, reconnect session with snmp-community based on serial
+      my %snmp_serials = %{get_snmp_table($session, $oid_cluster_serials)};
+      while (($oid, $value) = each (%snmp_serials)) {
+         chomp $value; # remove "\n" if exists
+         if ( !($value =~ $curr_serial) ) {
+            # print "Current serial is ".$value.", ours is ".$curr_serial.", change snmp community\n";
+            $community=$community."-".$value;
+            if ( $snmp_version == 3 ) {
+               # not managed
+            } else {
+               ($session, $error) = get_snmp_session(
+                                       $ip,
+                                       $community,
+                                       $port,
+                                       $snmp_version
+                                    );
+               $curr_device = get_snmp_value($session, $oid_unitdesc);
+               $curr_serial = get_snmp_value($session, $oid_serial);
+            }
+            if ( $error ne "" ) {
+               print "\n$error\n";
+               exit(1);
+            }
+         }
+      }
+   }
+
   my $value_usage = get_snmp_value($session, $oid_disk_usage);
   my $value_cap = get_snmp_value($session, $oid_disk_cap);
   my $value = (int (($value_usage/$value_cap)*100) );
@@ -373,8 +405,9 @@ sub get_disk_usage {
     $return_string = "Disk usage is okay: " . $value. "%";
   }
 
-  $return_string = $return_state . ": " . $return_string . "|'disk'=" . $value . "%;" . $warn . ";" . $crit;
+  $return_string = $return_state . ": " . $curr_device . " (Current device: " . $curr_serial .") " . $return_string . "|'disk'=" . $value . "%;" . $warn . ";" . $crit;
   return ($return_state, $return_string);
+
 }
 
 sub get_ha_mode {
